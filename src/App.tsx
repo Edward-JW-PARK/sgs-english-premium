@@ -5,11 +5,11 @@ import type {
   WorksheetOption,
   PdfResponse,
   WeeklyMetrics,
-  CustomSentenceRow,
 } from "./types/api";
 import "./App.css";
 
 export default function App() {
+  // ===== 모든 State 선언 (함수 최상단 집중) =====
   const [levels, setLevels] = useState<Level[]>([]);
   const [level, setLevel] = useState<Level>("A");
   const [option, setOption] = useState<WorksheetOption>(2);
@@ -17,30 +17,18 @@ export default function App() {
   const [studentName, setStudentName] = useState("");
   const [status, setStatus] = useState("준비됨");
   const [pdf, setPdf] = useState<PdfResponse | null>(null);
-
-  const [inputMode, setInputMode] = useState<"level" | "custom">("level");
-  const [customMode, setCustomMode] = useState<"text" | "table">("text");
-  const [customText, setCustomText] = useState("");
-
-  const emptyRow = (): CustomSentenceRow => ({
-    sentence: "", subject: "", verb: "",
-    object: "-", complement: "-",
-    pattern: "", grammar: "", translation: "",
-  });
-
-  const [tableRows, setTableRows] = useState<CustomSentenceRow[]>([emptyRow()]);
-  const [sentenceReady, setSentenceReady] = useState(false);
-
-  // ✅ level: "A" (string) 으로 초기화 — number 아님
+  
+  // 커스텀 문장 입력 기능 상태
+  const [customSentences, setCustomSentences] = useState("");
+  
+  // LOG 상태
   const [metrics, setMetrics] = useState<WeeklyMetrics>({
-    student: "", week: "",
-    level: "A",           // ← string
-    svTotal: 0, svCorrect: 0,
-    formTotal: 0, formCorrect: 0,
-    transSent: 0, transErr: 0,
-    memo: "",
+    student: "", week: "", level: 1,
+    svTotal: 0, svCorrect: 0, formTotal: 0, formCorrect: 0,
+    transSent: 0, transErr: 0, memo: ""
   });
 
+  // ===== 초기 로딩 Effect =====
   useEffect(() => {
     (async () => {
       try {
@@ -49,243 +37,253 @@ export default function App() {
         setLevels(data.levels);
         setLevel(data.levels[0] ?? "A");
         setStatus("준비됨");
-      } catch {
-        setStatus("연결 대기중 (API 설정 필요)");
+      } catch (e: any) {
+        console.error("API 연결 오류:", e);
+        setStatus(`연결 대기중 (API 설정 필요)`);
       }
     })();
   }, []);
 
-  const handleLoadLevel = async () => {
+  // ===== 이벤트 핸들러 함수들 =====
+  
+  const loadLevel = async () => {
     try {
-      setPdf(null); setSentenceReady(false);
+      setPdf(null);
       setStatus(`레벨 ${level} 불러오는 중...`);
       const r = await api.loadLevel(level);
-      setSentenceReady(true);
-      setStatus(`✅ 레벨 ${r.level} — ${r.sentenceCount}문장 INPUT 입력 완료`);
-    } catch (e) {
-      setStatus(`오류: ${e instanceof ApiError ? e.message : "레벨 로드 실패"}`);
+      setStatus(`완료: 레벨 ${r.level} ${r.sentenceCount}문장 INPUT 입력됨`);
+    } catch (e: any) {
+      const message = e instanceof ApiError ? e.message : "레벨 로드 실패";
+      setStatus(`오류: ${message}`);
     }
   };
 
-  const handleSaveText = async () => {
-    if (!customText.trim()) { setStatus("오류: 문장을 입력해주세요."); return; }
+  const handleAddCustomSentences = async () => {
     try {
-      setPdf(null); setSentenceReady(false); setStatus("문장 저장 중...");
-      const lines = customText.trim().split(/\r?\n/).filter(Boolean);
-
-      // ✅ CustomSentenceRow[] 타입으로 명시
-      const sentences: CustomSentenceRow[] = lines.map(line => {
-        const cols = line.split("\t");
-        if (cols.length >= 8) {
-          return {
-            sentence:    cols[0].trim(),
-            subject:     cols[1].trim(),
-            verb:        cols[2].trim(),
-            object:      cols[3].trim() || "-",
-            complement:  cols[4].trim() || "-",
-            pattern:     cols[5].trim(),
-            grammar:     cols[6].trim(),
-            translation: cols[7].trim(),
-          };
-        }
-        return { ...emptyRow(), sentence: line.trim() };
+      if (!customSentences.trim()) {
+        setStatus("오류: 문장을 입력해주세요");
+        return;
+      }
+      
+      setPdf(null);
+      setStatus("커스텀 문장을 INPUT에 저장 중...");
+      
+      const result = await api.addCustomSentences({
+        sentences: customSentences,
+        level: "CUSTOM",
+        saveToBank: false
       });
-
-      const result = await api.addCustomSentences({ sentences, level: "CUSTOM", saveToBank: false });
-      setSentenceReady(true);
-      setCustomText("");
-      setStatus(`✅ ${result.count}개 문장 INPUT 저장 완료`);
-    } catch (e) {
-      setStatus(`오류: ${e instanceof ApiError ? e.message : "저장 실패"}`);
+      
+      setStatus(`완료: ${result.count}개 문장이 INPUT에 저장됨`);
+      setCustomSentences(""); // 입력창 초기화
+    } catch (err: any) {
+      const message = err instanceof ApiError ? err.message : "커스텀 문장 저장 실패";
+      setStatus(`오류: ${message}`);
     }
   };
 
-  const updateRow = (idx: number, field: keyof CustomSentenceRow, value: string) => {
-    setTableRows(prev => prev.map((r, i) => i === idx ? { ...r, [field]: value } : r));
-  };
-
-  const handleSaveTable = async () => {
-    const valid = tableRows.filter(r => r.sentence.trim());
-    if (valid.length === 0) { setStatus("오류: 문장을 최소 1개 이상 입력하세요."); return; }
+  const generate = async () => {
     try {
-      setPdf(null); setSentenceReady(false); setStatus("문장 저장 중...");
-      const result = await api.addCustomSentences({ sentences: valid, level: "CUSTOM", saveToBank: false });
-      setSentenceReady(true);
-      setStatus(`✅ ${result.count}개 문장 INPUT 저장 완료`);
-    } catch (e) {
-      setStatus(`오류: ${e instanceof ApiError ? e.message : "저장 실패"}`);
+      setPdf(null);
+      setStatus(`WORKSHEET 생성 중... (옵션 ${option})`);
+      const r = await api.generateWorksheet({
+        option, titlePrefix, studentName,
+      });
+      setStatus(`완료: WORKSHEET 생성됨 (문장 ${r.sentenceCount}개)`);
+    } catch (e: any) {
+      const message = e instanceof ApiError ? e.message : "워크시트 생성 실패";
+      setStatus(`오류: ${message}`);
     }
   };
 
-  const handleGenerate = async () => {
-    if (!sentenceReady) { setStatus("오류: 먼저 레벨을 불러오거나 문장을 저장하세요."); return; }
-    try {
-      setPdf(null); setStatus(`WORKSHEET 생성 중... (옵션 ${option})`);
-      const r = await api.generateWorksheet({ option, titlePrefix, studentName });
-      setStatus(`✅ WORKSHEET 생성 완료 (${r.sentenceCount}문장)`);
-    } catch (e) {
-      setStatus(`오류: ${e instanceof ApiError ? e.message : "워크시트 생성 실패"}`);
-    }
-  };
-
-  const handleCreatePdf = async () => {
+  const createPdf = async () => {
     try {
       setStatus("PDF 생성 중...");
       const r = await api.createPdf("SGS_영어_워크시트");
       setPdf(r);
-      setStatus(`✅ PDF 생성 완료 (${r.fileName})`);
-    } catch (e) {
-      setStatus(`오류: ${e instanceof ApiError ? e.message : "PDF 생성 실패"}`);
+      setStatus(`완료: PDF 생성됨 (${r.fileName})`);
+    } catch (e: any) {
+      const message = e instanceof ApiError ? e.message : "PDF 생성 실패";
+      setStatus(`오류: ${message}`);
     }
   };
 
-  const handleSaveLog = async () => {
+  const saveLog = async () => {
     try {
       setStatus("LOG 저장 중...");
       await api.saveWeeklyMetrics(metrics);
-      setStatus("✅ LOG 저장 완료");
+      setStatus("완료: LOG 저장됨");
+      
+      // 저장 후 폼 초기화
       setMetrics({
-        student: "", week: "", level: "A",
-        svTotal: 0, svCorrect: 0,
-        formTotal: 0, formCorrect: 0,
-        transSent: 0, transErr: 0, memo: "",
+        student: "", week: "", level: 1,
+        svTotal: 0, svCorrect: 0, formTotal: 0, formCorrect: 0,
+        transSent: 0, transErr: 0, memo: ""
       });
-    } catch (e) {
-      setStatus(`오류: ${e instanceof ApiError ? e.message : "LOG 저장 실패"}`);
+    } catch (e: any) {
+      const message = e instanceof ApiError ? e.message : "LOG 저장 실패";
+      setStatus(`오류: ${message}`);
     }
   };
 
+  // ===== JSX 렌더링 (모든 UI는 여기에만) =====
   return (
     <div className="container">
       <h2 className="title">SGS 영어 구조훈련 (Premium)</h2>
-
-      {/* ── STEP 1: 문장 입력 ── */}
+      
+      {/* 1. 레벨 선택 */}
       <div className="card">
-        <h3>1) 문장 입력</h3>
-        <div className="tab-group">
-          <button className={`tab-btn ${inputMode === "level" ? "active" : ""}`} onClick={() => setInputMode("level")}>📚 레벨 문장 불러오기</button>
-          <button className={`tab-btn ${inputMode === "custom" ? "active" : ""}`} onClick={() => setInputMode("custom")}>✏️ 직접 입력</button>
-        </div>
-
-        {inputMode === "level" && (
-          <div className="panel">
-            <div className="row">
-              <select value={level} onChange={e => setLevel(e.target.value)}>
-                {levels.map(l => <option key={l} value={l}>{l}</option>)}
-              </select>
-              <button className="primary" onClick={handleLoadLevel}>불러오기</button>
-            </div>
-          </div>
-        )}
-
-        {inputMode === "custom" && (
-          <div className="panel">
-            <div className="tab-group sub">
-              <button className={`tab-btn ${customMode === "text" ? "active" : ""}`} onClick={() => setCustomMode("text")}>붙여넣기</button>
-              <button className={`tab-btn ${customMode === "table" ? "active" : ""}`} onClick={() => setCustomMode("table")}>직접 입력</button>
-            </div>
-
-            {customMode === "text" && (
-              <div>
-                <p className="guide-text">엑셀/스프레드시트에서 복사 후 붙여넣기<br/>열 순서: 문장 | 주어 | 동사 | 목적어 | 보어 | 패턴 | 문법 | 해석</p>
-                <textarea className="full-width textarea" rows={8} value={customText} onChange={e => setCustomText(e.target.value)} placeholder="여기에 붙여넣기..." />
-                <button className="primary mt-1" onClick={handleSaveText}>저장</button>
-              </div>
-            )}
-
-            {customMode === "table" && (
-              <div>
-                <div className="table-scroll">
-                  <table className="input-table">
-                    <thead>
-                      <tr>
-                        <th>#</th><th>문장*</th><th>주어</th><th>동사</th>
-                        <th>목적어</th><th>보어</th><th>패턴</th><th>문법</th><th>해석</th><th></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tableRows.map((r, i) => (
-                        <tr key={i}>
-                          <td className="cell-num">{i + 1}</td>
-                          {(["sentence","subject","verb","object","complement","pattern","grammar","translation"] as (keyof CustomSentenceRow)[]).map(f => (
-                            <td key={f}><textarea className={`cell-input ${f === "sentence" ? "wide" : ""}`} rows={2} value={r[f]} onChange={e => updateRow(i, f, e.target.value)} /></td>
-                          ))}
-                          <td><button className="btn-icon-del" onClick={() => setTableRows(p => p.filter((_, j) => j !== i))}>✕</button></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="row mt-1">
-                  <button className="secondary" onClick={() => setTableRows(p => [...p, emptyRow()])}>+ 행 추가</button>
-                  <button className="primary" onClick={handleSaveTable}>저장</button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {sentenceReady && <div className="ready-badge">✅ 문장 준비 완료 — 워크시트를 생성하세요</div>}
-      </div>
-
-      {/* ── STEP 2: 워크시트 생성 ── */}
-      <div className="card">
-        <h3>2) 워크시트 생성</h3>
+        <h3>1) 레벨 문장 불러오기</h3>
         <div className="row">
-          <input value={titlePrefix} onChange={e => setTitlePrefix(e.target.value)} placeholder="워크시트 제목" />
-        </div>
-        <div className="row mt-1">
-          <input value={studentName} onChange={e => setStudentName(e.target.value)} placeholder="학생 이름 (선택)" />
-        </div>
-        <div className="option-group row mt-2">
-          {([1, 2, 3] as WorksheetOption[]).map(o => (
-            <label key={o}>
-              <input type="radio" name="option" value={o} checked={option === o} onChange={() => setOption(o)} />
-              {o === 1 ? "S/V 10초 훈련" : o === 2 ? "구조 분석" : "완전 분석"}
-            </label>
-          ))}
+          <select value={level} onChange={(e) => setLevel(e.target.value as Level)}>
+            {levels.length > 0 ? levels.map((l) => (
+              <option key={l} value={l}>레벨 {l}</option>
+            )) : <option>로딩중...</option>}
+          </select>
+          <button onClick={loadLevel} className="primary">INPUT에 불러오기</button>
         </div>
         <div className="row mt-2">
-          <button className="primary" onClick={handleGenerate}>워크시트 생성</button>
-          <button className="secondary" onClick={handleCreatePdf}>PDF 생성</button>
+          <input 
+            value={titlePrefix} 
+            onChange={(e) => setTitlePrefix(e.target.value)} 
+            placeholder="머리말 제목" 
+          />
+          <input 
+            value={studentName} 
+            onChange={(e) => setStudentName(e.target.value)} 
+            placeholder="이름" 
+          />
+        </div>
+      </div>
+
+      {/* ✅ 1-1. 커스텀 문장 입력 (이제 올바른 위치) */}
+      <div className="card">
+        <h3>1-1) 직접 문장 입력하기</h3>
+        <p style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>
+          한 줄에 한 문장씩 입력하세요. 레벨에 관계없이 입력한 문장들로 워크시트가 생성됩니다.
+        </p>
+        <textarea
+          rows={6}
+          value={customSentences}
+          onChange={(e) => setCustomSentences(e.target.value)}
+          placeholder={`예시:\nI have a dog.\nShe is very kind.\nThey went to the park yesterday.`}
+          className="textarea"
+          style={{ 
+            width: "100%", 
+            resize: "vertical", 
+            marginBottom: 10,
+            padding: "10px",
+            border: "2px solid #e2e8f0",
+            borderRadius: "8px",
+            fontSize: "14px"
+          }}
+        />
+        <button 
+          onClick={handleAddCustomSentences} 
+          className="primary full-width"
+          disabled={!customSentences.trim()}
+          style={{ 
+            opacity: customSentences.trim() ? 1 : 0.6,
+            cursor: customSentences.trim() ? "pointer" : "not-allowed"
+          }}
+        >
+          위 문장들로 INPUT 채우기
+        </button>
+      </div>
+
+      {/* 2. 워크시트 옵션 */}
+      <div className="card">
+        <h3>2) 워크시트 옵션</h3>
+        <div className="row option-group">
+          <label>
+            <input type="radio" checked={option===1} onChange={()=>setOption(1)} /> 
+            옵션1 (S/V)
+          </label>
+          <label>
+            <input type="radio" checked={option===2} onChange={()=>setOption(2)} /> 
+            옵션2 (박스)
+          </label>
+          <label>
+            <input type="radio" checked={option===3} onChange={()=>setOption(3)} /> 
+            옵션3 (형식)
+          </label>
+        </div>
+        <div className="row mt-2">
+          <button onClick={generate} className="primary">WORKSHEET 생성</button>
+          <button onClick={createPdf} className="secondary">PDF 만들기</button>
         </div>
         {pdf && (
           <div className="pdf-box">
-            <p>📄 {pdf.fileName}</p>
-            <a className="btn-link" href={pdf.viewUrl} target="_blank" rel="noreferrer">미리보기</a>
-            <a className="btn-link" href={pdf.downloadUrl} target="_blank" rel="noreferrer">다운로드</a>
+            <p>✅ PDF 생성 완료!</p>
+            <div className="row">
+              <a href={pdf.viewUrl} target="_blank" rel="noopener noreferrer" className="btn-link">
+                📄 PDF 보기
+              </a>
+              <a href={pdf.downloadUrl} target="_blank" rel="noopener noreferrer" className="btn-link">
+                ⬇️ 다운로드
+              </a>
+            </div>
           </div>
         )}
       </div>
 
-      {/* ── STEP 3: 주간 LOG ── */}
+      {/* 3. 주간 지표 LOG */}
       <div className="card">
         <h3>3) 주간 지표(LOG)</h3>
-        <div className="row"><input placeholder="학생 이름" value={metrics.student} onChange={e => setMetrics(p => ({ ...p, student: e.target.value }))} /></div>
-        <div className="row mt-1">
-          <input placeholder="주차 (예: 2026-W10)" value={metrics.week} onChange={e => setMetrics(p => ({ ...p, week: e.target.value }))} />
-          {/* ✅ level은 string이므로 그대로 e.target.value 사용 */}
-          <input placeholder="레벨 (예: A, 중1, 수능)" value={metrics.level} onChange={e => setMetrics(p => ({ ...p, level: e.target.value }))} className="short" />
+        <div className="row">
+          <input 
+            value={metrics.student} 
+            onChange={(e)=>setMetrics({...metrics, student: e.target.value})} 
+            placeholder="학생/반" 
+          />
+          <input 
+            value={metrics.week} 
+            onChange={(e)=>setMetrics({...metrics, week: e.target.value})} 
+            placeholder="주차" 
+          />
+          <select 
+            value={metrics.level} 
+            onChange={(e)=>setMetrics({...metrics, level: Number(e.target.value)})}
+          >
+            <option value={1}>Lv.1</option>
+            <option value={2}>Lv.2</option>
+            <option value={3}>Lv.3</option>
+          </select>
         </div>
-        <div className="row mt-1">
-          <input type="number" placeholder="S/V 전체" value={metrics.svTotal} onChange={e => setMetrics(p => ({ ...p, svTotal: Number(e.target.value) }))} />
-          <input type="number" placeholder="S/V 정답" value={metrics.svCorrect} onChange={e => setMetrics(p => ({ ...p, svCorrect: Number(e.target.value) }))} />
+        <div className="row mt-2 items-center">
+          <span>SV(총/정답):</span>
+          <input 
+            type="number" 
+            className="short" 
+            value={metrics.svTotal} 
+            onChange={(e)=>setMetrics({...metrics, svTotal: Number(e.target.value)})} 
+            min="0"
+          />
+          <span>/</span>
+          <input 
+            type="number" 
+            className="short" 
+            value={metrics.svCorrect} 
+            onChange={(e)=>setMetrics({...metrics, svCorrect: Number(e.target.value)})} 
+            min="0"
+            max={metrics.svTotal}
+          />
         </div>
-        <div className="row mt-1">
-          <input type="number" placeholder="형식 전체" value={metrics.formTotal} onChange={e => setMetrics(p => ({ ...p, formTotal: Number(e.target.value) }))} />
-          <input type="number" placeholder="형식 정답" value={metrics.formCorrect} onChange={e => setMetrics(p => ({ ...p, formCorrect: Number(e.target.value) }))} />
+        <div className="row mt-2">
+          <textarea 
+            value={metrics.memo} 
+            onChange={(e)=>setMetrics({...metrics, memo: e.target.value})} 
+            placeholder="메모" 
+            rows={3} 
+          />
         </div>
-        <div className="row mt-1">
-          <input type="number" placeholder="해석 문장수" value={metrics.transSent} onChange={e => setMetrics(p => ({ ...p, transSent: Number(e.target.value) }))} />
-          <input type="number" placeholder="해석 오류수" value={metrics.transErr} onChange={e => setMetrics(p => ({ ...p, transErr: Number(e.target.value) }))} />
-        </div>
-        <div className="row mt-1">
-          <input placeholder="메모" value={metrics.memo} onChange={e => setMetrics(p => ({ ...p, memo: e.target.value }))} />
-        </div>
-        <button className="secondary mt-2" onClick={handleSaveLog}>LOG 저장</button>
+        <button onClick={saveLog} className="mt-2 primary full-width">LOG 저장</button>
       </div>
 
-      <div className={`status-bar ${status.startsWith("오류") ? "error" : ""}`}>{status}</div>
+      {/* 상태 표시 바 */}
+      <div className={`status-bar ${status.includes("오류") ? "error" : ""}`}>
+        {status}
+      </div>
     </div>
   );
 }
