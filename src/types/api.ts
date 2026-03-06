@@ -35,7 +35,7 @@ export interface PdfResponse {
 export interface WeeklyMetrics {
   student:     string;
   week:        string;
-  level:       Level;   // ← number → Level(string) 로 수정
+  level: string;  // ← number → Level(string) 로 수정
   svTotal:     number;
   svCorrect:   number;
   formTotal:   number;

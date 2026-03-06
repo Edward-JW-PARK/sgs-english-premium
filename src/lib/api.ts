@@ -113,6 +113,6 @@ export const api = {
     callApi<PdfResponse>("createPdf", { fileNamePrefix }),
 
   // 주간 지표 LOG 저장
-  saveWeeklyMetrics: (metrics: WeeklyMetrics) =>
-    callApi<SaveMetricsResponse>("saveWeeklyMetrics", metrics),
+saveWeeklyMetrics: (metrics: WeeklyMetrics) =>
+  callApi<SaveMetricsResponse>("saveWeeklyMetrics", { ...metrics }),
 };
