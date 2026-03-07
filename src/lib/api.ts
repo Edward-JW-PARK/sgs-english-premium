@@ -49,11 +49,12 @@ export async function callApi<T>(
   payload: Record<string, unknown> = {}
 ): Promise<T> {
   try {
-    const response = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ action, payload, apiKey: API_KEY }),
-    });
+const response = await fetch(API_URL, {
+  method: "POST",
+  headers: { "Content-Type": "text/plain;charset=utf-8" },
+  body: JSON.stringify({ action, payload, apiKey: API_KEY }),
+  redirect: "follow",   // ← 이 한 줄 추가
+});
 
     if (!response.ok) {
       throw new ApiError(`HTTP ${response.status}: ${response.statusText}`);
